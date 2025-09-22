@@ -7,7 +7,6 @@ import (
 )
 
 func main() {
-
 	listen, err := net.Listen("tcp", "0.0.0.0:8082")
 	if err != nil {
 		fmt.Println("创建服务端失败", err)

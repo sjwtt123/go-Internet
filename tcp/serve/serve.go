@@ -2,7 +2,7 @@ package main
 
 import (
 	"fmt"
-	method "go-Internet/tcp/method/Servemethod"
+	method "go-Internet/tcp/serve/ServeMethod"
 	"net"
 )
 
@@ -33,14 +33,11 @@ func main() {
 		}
 		fmt.Printf("连接成功对应的ip地址，端口号：%v\n", accept.RemoteAddr().String())
 
+		//为每个用户开启广播协程
 		go method.Radio()
 
-		go func() {
-			err3 := method.Createprocess(accept)
-			if err3 != nil {
-				fmt.Println(err3)
-			}
-		}()
+		//开启登录功能
+		go method.ISLoginOrCreate(accept)
 
 	}
 }

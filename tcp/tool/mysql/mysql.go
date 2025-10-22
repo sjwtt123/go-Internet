@@ -6,6 +6,12 @@ import (
 	"github.com/jmoiron/sqlx"
 )
 
+type User struct {
+	Id     int    `db:"id"`
+	Name   string `db:"name"`
+	Passwd string `db:"passwd"`
+}
+
 func Start() (error, *sqlx.DB) {
 
 	open, err := sqlx.Open("mysql", "root:1234@tcp(127.0.0.1:3306)/system1")

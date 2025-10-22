@@ -2,7 +2,7 @@ package ClientMethod
 
 import (
 	"fmt"
-	same "go-Internet/tcp/ReadWritermethod"
+	same "go-Internet/tcp/Samemethod"
 	"net"
 )
 

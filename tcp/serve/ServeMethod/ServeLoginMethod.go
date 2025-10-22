@@ -2,12 +2,13 @@ package ServeMethod
 
 import (
 	"fmt"
-	same "go-Internet/tcp/ReadWritermethod"
+	same "go-Internet/tcp/Samemethod"
 	"go-Internet/tcp/tool/mysql"
 	"net"
+	"runtime/debug"
 )
 
-// Init 初始化
+// Init 初始化mysql
 func Init() {
 	//初始化数据库
 	err, dbs := mysql.Start()
@@ -20,6 +21,13 @@ func Init() {
 
 // ISLoginOrCreate 判断登录或者创建用户
 func ISLoginOrCreate(conn net.Conn) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("ISLoginOrCreate()协程发生 panic: %v\n", r)
+			debug.PrintStack() // 打印堆栈跟踪
+		}
+	}()
+
 	Init()
 
 	scanner, err := same.Read(conn)
@@ -65,7 +73,7 @@ LOOP:
 
 		isHaveClient := FindClient(username)
 
-		if !isHaveUser || isHaveClient.nickname != "" {
+		if !isHaveUser || isHaveClient.Nickname != "" {
 			err2 := same.Write("noCreate", conn)
 			if err2 != nil {
 				return fmt.Errorf("登录判断用户存在写入数据失败:%v", err2)
@@ -180,10 +188,12 @@ LOOP:
 func Createprocess(username string, conn net.Conn) {
 
 	//创建用户对象存每个客户的用户名，加入到在线客户端中
-	client := Client{nickname: username, conn: conn}
-	clientManager.AddClient(client)
+	client := Client{Nickname: username, Conn: conn, Boo: true}
+	HbManager.AddClient(&client)
 
 	messageChan <- fmt.Sprintf("%s进入聊天室", username)
+
+	//开启信息处理流程
 	CRead(conn, client)
 
 }

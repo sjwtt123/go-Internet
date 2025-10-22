@@ -8,7 +8,6 @@ import (
 
 // IsHaveUser 查询数据库中是否有该用户
 func IsHaveUser(username string) bool {
-
 	boo, err := mysql.SelectOneByName(db, username)
 	if err != nil {
 		fmt.Println("查询出错：", err)
@@ -31,11 +30,11 @@ func FindName(s string) (string, string, error) {
 
 // FindClient 寻找用户
 func FindClient(name string) Client {
-	clientManager.Mutex.Lock()
-	defer clientManager.Mutex.Unlock()
-	for client, _ := range clientManager.clients {
-		if client.nickname == name {
-			return client
+	HbManager.mutex.Lock()
+	defer HbManager.mutex.Unlock()
+	for _, client := range HbManager.clients {
+		if client.Nickname == name {
+			return *client
 		}
 	}
 
@@ -44,10 +43,10 @@ func FindClient(name string) Client {
 }
 
 // CloseConn 关闭与客户端连接
-func CloseConn(client Client) {
-	err := client.conn.Close()
+func CloseConn(client *Client) {
+	err := client.Conn.Close()
 	if err != nil {
-		fmt.Printf("关闭%v客户端失败%v", client.nickname, err)
+		fmt.Printf("关闭%v客户端失败%v", client.Nickname, err)
 		return
 	}
 

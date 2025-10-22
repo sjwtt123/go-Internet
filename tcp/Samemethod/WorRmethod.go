@@ -1,4 +1,4 @@
-package ReadWritermethod
+package Samemethod
 
 import (
 	"bufio"

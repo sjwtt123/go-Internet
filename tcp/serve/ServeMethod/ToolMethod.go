@@ -3,6 +3,7 @@ package ServeMethod
 import (
 	"fmt"
 	"go-Internet/tcp/tool/mysql"
+	"log"
 	"strings"
 )
 
@@ -10,7 +11,7 @@ import (
 func IsHaveUser(username string) bool {
 	boo, err := mysql.SelectOneByName(db, username)
 	if err != nil {
-		fmt.Println("查询出错：", err)
+		log.Println("查询出错：", err)
 	}
 	return boo
 
@@ -19,7 +20,7 @@ func IsHaveUser(username string) bool {
 // FindName 私发功能找用户名
 func FindName(s string) (string, string, error) {
 	index := strings.Index(s, "[")
-	index1 := strings.Index(s, "]")
+	index1 := strings.LastIndex(s, "]")
 	if index < 0 || index1 < 0 || index1+2 >= len(s) {
 		return "", "", fmt.Errorf("输入格式错误\n")
 	}
@@ -37,17 +38,14 @@ func FindClient(name string) Client {
 			return *client
 		}
 	}
-
 	return Client{}
-
 }
 
 // CloseConn 关闭与客户端连接
 func CloseConn(client *Client) {
 	err := client.Conn.Close()
 	if err != nil {
-		fmt.Printf("关闭%v客户端失败%v", client.Nickname, err)
+		log.Printf("关闭%v客户端失败%v", client.Nickname, err)
 		return
 	}
-
 }

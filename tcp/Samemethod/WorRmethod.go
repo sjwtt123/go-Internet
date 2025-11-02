@@ -14,7 +14,7 @@ func Read(conn net.Conn) (*bufio.Scanner, error) {
 		return nil, err
 	}
 	scanner := bufio.NewScanner(strings.NewReader(string(by[:i])))
-	return scanner, err
+	return scanner, nil
 }
 func Write(s string, conn net.Conn) error {
 	s += "\n"

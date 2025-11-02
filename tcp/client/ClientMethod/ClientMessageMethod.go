@@ -3,50 +3,53 @@ package ClientMethod
 import (
 	"fmt"
 	same "go-Internet/tcp/Samemethod"
+	"go-Internet/tcp/tool/redis"
+	"log"
 	"net"
 	"runtime/debug"
 	"time"
 )
 
-var (
-	boo  = true
-	dial net.Conn
-)
+type Client struct {
+	Boo      bool //是否上线
+	Dial     net.Conn
+	Nickname string //用户名
+}
 
 // Read 并发读协程
-func Read(dial net.Conn) error {
+func (client *Client) Read() error {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("Read()协程发生 panic: %v\n", r)
+			log.Printf("Read()协程发生 panic: %v\n", r)
 			debug.PrintStack() // 打印堆栈跟踪
 		}
 	}()
 
 	for {
-		scanner, err := same.Read(dial)
+		scanner, err := same.Read(client.Dial)
+
 		if err != nil {
-			fmt.Println("读取结束,连接关闭")
-			return err
+			return fmt.Errorf("读取结束,连接关闭:%v", err)
+		}
+
+		for scanner.Scan() {
+			msg := scanner.Text() // 自动按\n拆分
+			fmt.Println(msg)
 		}
 
 		// 检查退出原因：错误或EOF
 		if err = scanner.Err(); err != nil {
-			fmt.Println("连接关闭，读取结束")
-			return err
-		}
-		for scanner.Scan() {
-			msg := scanner.Text() // 自动按\n拆分
-			fmt.Println(msg)
+			return fmt.Errorf("连接异常退出：%v", err)
 		}
 
 	}
 }
 
 // WriteHeart 并发写协程来进行心跳检测
-func WriteHeart() error {
+func (client *Client) WriteHeart() error {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("WriteHeart()协程发生 panic: %v\n", r)
+			log.Printf("WriteHeart()协程发生 panic: %v\n", r)
 			debug.PrintStack() // 打印堆栈跟踪
 		}
 	}()
@@ -55,16 +58,14 @@ func WriteHeart() error {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		message, err := same.CreateMessage("Ping", "")
+		message, err := same.CreateMessage(client.Nickname, "", TypeHeart, "")
 		if err != nil {
-			fmt.Println("心跳检测ping客户端创建消息失败", err)
-			return err
+			return fmt.Errorf("心跳检测ping客户端:%v", err)
 		}
 
-		err1 := same.Write(message, dial)
+		err1 := redis.ClientSendMessage(client.Nickname, message)
 		if err1 != nil {
-			fmt.Println("心跳检测客户端ping服务端传入数据失败：", err1)
-			return err1
+			return fmt.Errorf("心跳检测ping客户端:%v", err)
 		}
 	}
 	return nil
@@ -72,23 +73,28 @@ func WriteHeart() error {
 }
 
 // Start 开启业务
-func Start() error {
+func (client *Client) Start() error {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf(" Start()协程发生panic: %v\n", r)
+			log.Printf(" Start()协程发生panic: %v\n", r)
 			debug.PrintStack() // 打印堆栈跟踪
 		}
 	}()
 
+	//读取离线消息
+	err1 := redis.ReceiveHistoryAllMessage(client.Nickname)
+	if err1 != nil {
+		return err1
+	}
+	fmt.Println("------以上是历史消息------")
+
 	//欢迎开场白
 	showWelcomeMessage()
-
 	for {
 		//从终端取到数据
 		readString, err := GetfromShell()
 		if err != nil {
-			fmt.Println("终端输入失败", err)
-			continue
+			return err
 		}
 
 		switch readString {
@@ -96,37 +102,41 @@ func Start() error {
 			showPrivateChatHelp()
 
 		case "2":
-			boo, err = Online(boo)
+			client.Boo, err = client.Online()
 			if err != nil {
 				return err
 			}
 			continue
 
 		case "3":
-			boo, err = UnderLine(boo)
+			client.Boo, err = client.UnderLine()
 			if err != nil {
 				return err
 			}
 			continue
 
 		case "4":
-			err1 := List()
+			err1 = client.List()
 			if err1 != nil {
-				fmt.Println("显示所有用户失败：", err1)
 				return err
 			}
 
 		case "5":
-			err := dial.Close()
+			err = ActiveList()
 			if err != nil {
-				fmt.Println("关闭与服务端连接失败")
 				return err
+			}
+
+		case "6":
+			err = client.Dial.Close()
+			if err != nil {
+				return fmt.Errorf("关闭与服务端连接失败:%v", err)
 			}
 			fmt.Println("已退出聊天室")
 			return nil
 
 		default:
-			err2 := WriteTO(boo, readString)
+			err2 := client.WriteTO(readString)
 			if err2 != nil {
 				return err
 			}
@@ -136,21 +146,20 @@ func Start() error {
 }
 
 // Online 上线功能
-func Online(boo bool) (bool, error) {
-	if boo {
+func (client *Client) Online() (bool, error) {
+	if client.Boo {
 		fmt.Println("已上线，请勿重复上线功能")
 	} else {
 		fmt.Println("已上线，可以与别人交流")
 
-		marshal, err2 := same.CreateMessage("Online", "")
+		marshal, err2 := same.CreateMessage(client.Nickname, "", TypeOnline, "")
 		if err2 != nil {
-			fmt.Println("上线功能序列化失败：", err2)
-			return false, err2
+			return false, fmt.Errorf("客户端创建上线功能：%v", err2)
 		}
-		err := same.Write(marshal, dial)
+
+		err := redis.ClientSendMessage(client.Nickname, marshal)
 		if err != nil {
-			fmt.Println("上线功能写入出现错误", err)
-			return false, err
+			return false, fmt.Errorf("客户端创建上线功能：%v", err)
 		}
 
 		return true, nil
@@ -159,32 +168,31 @@ func Online(boo bool) (bool, error) {
 }
 
 // UnderLine 下线功能
-func UnderLine(boo bool) (bool, error) {
-	if !boo {
+func (client *Client) UnderLine() (bool, error) {
+	if !client.Boo {
 		fmt.Println("已下线，请勿重复上线功能")
 	} else {
 		fmt.Println("已下线，无法回复消息")
 
-		marshal, err2 := same.CreateMessage("UnderLine", "")
+		marshal, err2 := same.CreateMessage(client.Nickname, "", TypeUnderLine, "")
 		if err2 != nil {
-			fmt.Println("上线功能序列化失败：", err2)
-			return false, err2
+			return false, fmt.Errorf("客户端创建下线功能：%v", err2)
 		}
-		err := same.Write(marshal, dial)
 
+		//将数据写到流内
+		err := redis.ClientSendMessage(client.Nickname, marshal)
 		if err != nil {
-			fmt.Println("下线功能写入出现错误", err)
-			return false, err
+			return false, fmt.Errorf("客户端创建下线功能：%v", err)
 		}
-		boo = false
-		return boo, nil
+		client.Boo = false
+		return client.Boo, nil
 	}
 	return false, nil
 }
 
 // WriteTO 发送功能
-func WriteTO(boo bool, readString string) error {
-	if !boo {
+func (client *Client) WriteTO(readString string) error {
+	if !client.Boo {
 		fmt.Println("正在下线状态无法发送信息")
 		return nil
 	}
@@ -194,40 +202,49 @@ func WriteTO(boo bool, readString string) error {
 	//判断是私发还是群发功能
 	if len(readString) >= 2 && readString[0:2] == "TO" {
 
-		marshal, err1 = same.CreateMessage("Private", readString)
+		marshal, err1 = same.CreateMessage(client.Nickname, "", TypePrivate, readString)
 		if err1 != nil {
-			fmt.Println("客户端私发消息错误：", err1)
-			return err1
+			return fmt.Errorf("客户端私发消息功能：%v", err1)
 		}
+
 	} else {
-		marshal, err1 = same.CreateMessage("Every", readString)
+		marshal, err1 = same.CreateMessage(client.Nickname, "", TypeRadio, readString)
 		if err1 != nil {
-			fmt.Println("客户端群发消息错误：", err1)
-			return err1
+			return fmt.Errorf("客户端群发消息功能：%v", err1)
 		}
 	}
 
-	err := same.Write(marshal, dial)
+	err := redis.ClientSendMessage(client.Nickname, marshal)
 	if err != nil {
-		fmt.Println("发送消息功能写入出现错误")
-		return err
+		return fmt.Errorf("客户端发送消息功能：%v", err)
 	}
 	return nil
 }
 
 // List 列表功能
-func List() error {
+func (client *Client) List() error {
 
-	marshal, err1 := same.CreateMessage("List", "")
+	marshal, err1 := same.CreateMessage(client.Nickname, "", TypeList, "")
 	if err1 != nil {
-		fmt.Println("客户端群发消息错误：", err1)
-		return err1
+		return fmt.Errorf("客户端list列表功能：%v", err1)
 	}
 
-	err := same.Write(marshal, dial)
+	err := redis.ClientSendMessage(client.Nickname, marshal)
 	if err != nil {
-		fmt.Println("列表功能写入出现错误", err)
+		return fmt.Errorf("客户端list列表功能：%v", err)
+	}
+	return nil
+}
+
+func ActiveList() error {
+	active, err := redis.FindAllActive()
+	if err != nil {
 		return err
 	}
+	fmt.Println("----------------------------")
+	for i, a := range active {
+		fmt.Printf("活跃度排名：%v  用户：%v\n", i+1, a.Member.(string))
+	}
+	fmt.Println("----------------------------")
 	return nil
 }

@@ -6,15 +6,17 @@ import (
 )
 
 type SendMessage struct {
-	Type    string `json:"type"`
-	Message string `json:"message"`
+	FromUserId string `json:"from_user_id"`
+	ToUserId   string `json:"to_user_id"`
+	Content    string `json:"content"`
+	Tp         string `json:"tp"`
 }
 
 // Marshal 将信息序列化
 func (receiver *SendMessage) Marshal() (string, error) {
 	marshal, err := json.Marshal(receiver)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("将发送消息序列化错误：%v", err)
 	}
 	return string(marshal), nil
 }
@@ -23,17 +25,19 @@ func (receiver *SendMessage) Marshal() (string, error) {
 func (receiver *SendMessage) Unmarshal(str string) (error, *SendMessage) {
 	err := json.Unmarshal([]byte(str), receiver)
 	if err != nil {
-		return err, nil
+		return fmt.Errorf("将发送消息反序列化错误：%v", err), nil
 	}
-	return err, receiver
+	return nil, receiver
 }
 
-// CreateMessage 通过传入消息类型和消息来创建消息序列
-func CreateMessage(ty string, message string) (string, error) {
+// CreateMessage 创建消息序列
+func CreateMessage(from string, to string, ty string, message string) (string, error) {
 
 	sendMessage := &SendMessage{
-		Type:    ty,
-		Message: message,
+		FromUserId: from,
+		ToUserId:   to,
+		Tp:         ty,
+		Content:    message,
 	}
 
 	marshal, err := sendMessage.Marshal()
@@ -48,13 +52,32 @@ func CreateMessage(ty string, message string) (string, error) {
 func AnalyzeMessage(message string) (string, string, error) {
 
 	sendMessage := &SendMessage{
-		Type:    "",
-		Message: "",
+		FromUserId: "",
+		ToUserId:   "",
+		Tp:         "",
+		Content:    message,
 	}
 	err, s := sendMessage.Unmarshal(message)
 	if err != nil {
-		fmt.Println("接受消息处理反序列化失败")
 		return "", "", err
 	}
-	return s.Message, s.Type, nil
+	return s.Content, s.Tp, nil
+}
+
+// AnalyzeHistoryMessage 反序列化得到需要的历史数据
+func AnalyzeHistoryMessage(message string) (string, string, string, error) {
+
+	sendMessage := &SendMessage{
+		FromUserId: "",
+		ToUserId:   "",
+		Tp:         "",
+		Content:    message,
+	}
+	err, s := sendMessage.Unmarshal(message)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	return s.FromUserId, s.ToUserId, s.Content, err
+
 }

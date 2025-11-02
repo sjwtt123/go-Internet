@@ -2,6 +2,7 @@ package ServeMethod
 
 import (
 	"fmt"
+	"log"
 	"runtime/debug"
 	"sync"
 	"time"
@@ -61,7 +62,7 @@ func (hm *HeartbeatManager) UpdateClientActivity(name string) {
 func (hm *HeartbeatManager) Start() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("Start()协程发生 panic: %v\n", r)
+			log.Printf("Start()协程发生 panic: %v\n", r)
 			debug.PrintStack() // 打印堆栈跟踪
 		}
 	}()
@@ -89,7 +90,7 @@ func (hm *HeartbeatManager) checkHeartbeats() {
 
 		// 如果超时，关闭连接并移除
 		if timeSinceLastActive > hm.timeout {
-			fmt.Printf("客户端 %s 心跳超时 (%.0f秒) 断开连接\n",
+			log.Printf("客户端 %s 心跳超时 (%.0f秒) 断开连接\n",
 				client.Nickname, timeSinceLastActive.Seconds())
 			leaveChan <- *client // 从管理器中移除
 		} else {

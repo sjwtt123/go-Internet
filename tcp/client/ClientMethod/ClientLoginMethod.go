@@ -3,130 +3,135 @@ package ClientMethod
 import (
 	"fmt"
 	same "go-Internet/tcp/Samemethod"
-	"net"
 )
 
 // Createprocess 创建登录或注册进程
-func Createprocess(conn net.Conn) error {
-	dial = conn
+func (client *Client) Createprocess() error {
 	for {
 		fmt.Println("请选择登录：1or注册：2")
 		selectString, err := GetfromShell()
 		if err != nil {
-			fmt.Println("登录，注册功能从终端获取数据失败", err)
-			return err
+			return fmt.Errorf("登录，注册功能：%v", err)
 		}
 
 		switch selectString {
-		case "1":
-			err := LoginUser()
+		case ClientCommandLogin:
+			err = client.LoginUser()
 			if err != nil {
+				if err.Error() == "登录失败" {
+					continue
+				}
 				return err
 			}
-			return nil
-		case "2":
-			err := RegisterUser()
+
+		case ClientCommandRegister:
+			err = client.RegisterUser()
 			if err != nil {
+				if err.Error() == "注册失败" {
+					continue
+				}
 				return err
 			}
-			return nil
+
 		default:
 			fmt.Println("请输入正确的选择")
 			continue
 		}
+		return nil
 	}
 }
 
 // RegisterUser 注册新用户
-func RegisterUser() error {
-	err := same.Write("2", dial)
+func (client *Client) RegisterUser() error {
+	err := same.Write(ClientCommandRegister, client.Dial)
 	if err != nil {
-		return err
+		return fmt.Errorf("传入注册信息失败：%v", err)
 	}
 
-	for {
-		username, passwd := GetNameAndPasswd()
+	username, passwd := GetNameAndPasswd()
 
-		err := same.Write(username, dial)
-		if err != nil {
-			fmt.Println("注册时写入用户名数据错误", err)
-			return err
-		}
-		scanner, err := same.Read(dial)
-		if err != nil {
-			fmt.Println("读入用户名是否重复数据失败", err)
-			return err
-		}
+	err = same.Write(username, client.Dial)
+	if err != nil {
+		return fmt.Errorf("注册时写入用户名数据错误:%v", err)
+	}
+	scanner, err := same.Read(client.Dial)
+	if err != nil {
+		return fmt.Errorf("读入用户名是否重复数据失败:%v", err)
+	}
 
-		for scanner.Scan() {
-			if scanner.Text() == "isCreate" {
-				fmt.Println("用户名已存在，请重新输入")
-				break
-			} else {
-				err1 := same.Write(passwd, dial)
-				if err1 != nil {
-					fmt.Println("传入密码数据失败", err1)
-					return err1
-				}
-				return nil
+	for scanner.Scan() {
+		if scanner.Text() == ResponseUserExists {
+
+			fmt.Println("用户已存在请重新输入")
+			return fmt.Errorf("注册失败")
+		} else {
+			err1 := same.Write(passwd, client.Dial)
+			if err1 != nil {
+				return fmt.Errorf("传入密码数据失败:%v", err1)
 			}
-		}
 
+			//注册成功赋值nickname
+			client.Nickname = username
+			return nil
+		}
 	}
+
+	return nil
 
 }
 
 // LoginUser 用户登录
-func LoginUser() error {
-	err := same.Write("1", dial)
+func (client *Client) LoginUser() error {
+	err := same.Write(ClientCommandLogin, client.Dial)
 	if err != nil {
-		return err
+		return fmt.Errorf("传入登录信息失败：%v", err)
 	}
 
-LOOP:
-	for {
-		username, passwd := GetNameAndPasswd()
-		err := same.Write(username, dial)
-		if err != nil {
-			fmt.Println("登录时传入数据错误", err)
-			return err
-		}
-		scanner, err := same.Read(dial)
-		if err != nil {
-			fmt.Println("登录时从服务端读入用户名验证失败", err)
-			return err
-		}
-
-		for scanner.Scan() {
-			if scanner.Text() == "noCreate" {
-				fmt.Println("用户名不存在或已登录，请重新输入")
-				goto LOOP
-			} else {
-				err := same.Write(passwd, dial)
-				if err != nil {
-					return fmt.Errorf("%s传入密码数据失败", err)
-				}
-				break
-			}
-		}
-
-		scanner1, err := same.Read(dial)
-		if err != nil {
-			fmt.Println("登录时从服务端读入密码验证失败", err)
-			return err
-		}
-
-		for scanner1.Scan() {
-			if scanner1.Text() == "false" {
-				fmt.Println("密码错误，请重新输入")
-				break
-			} else {
-				fmt.Println("登录成功")
-				return nil
-			}
-		}
-
+	username, passwd := GetNameAndPasswd()
+	err = same.Write(username, client.Dial)
+	if err != nil {
+		return fmt.Errorf("登录时传入数据错误：%v", err)
 	}
+
+	//验证用户名
+	scanner, err := same.Read(client.Dial)
+	if err != nil {
+		return fmt.Errorf("登录时从服务端读入用户名验证失败:%v", err)
+	}
+
+	for scanner.Scan() {
+		if scanner.Text() == ResponseUserExistsOrLo {
+
+			fmt.Println("用户不存在或已登录请重新输入")
+			return fmt.Errorf("登录失败")
+		} else {
+			err = same.Write(passwd, client.Dial)
+			if err != nil {
+				return fmt.Errorf("传入密码数据失败:%v", err)
+			}
+			break
+		}
+	}
+
+	//验证密码
+	scanner1, err := same.Read(client.Dial)
+	if err != nil {
+		return fmt.Errorf("登录时从服务端读入密码验证失败:%v", err)
+	}
+
+	for scanner1.Scan() {
+		if scanner1.Text() == ResponseLoginFailed {
+			fmt.Println("登录密码错误,请重新输入")
+			return fmt.Errorf("登录失败")
+		} else {
+
+			client.Nickname = username
+			fmt.Println("登录成功")
+			return nil
+		}
+	}
+
+	return nil
 }
 
 // GetNameAndPasswd 从终端获取用户名和密码

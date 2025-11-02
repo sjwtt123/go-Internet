@@ -1,10 +1,12 @@
 package ServeMethod
 
 import (
+	"context"
 	"fmt"
 	"github.com/jmoiron/sqlx"
 	same "go-Internet/tcp/Samemethod"
-	"io"
+	"go-Internet/tcp/tool/redis"
+	"log"
 	"net"
 	"runtime/debug"
 	"time"
@@ -12,10 +14,10 @@ import (
 
 // Client 客户端
 type Client struct {
-	Conn       net.Conn  // TCP连接
-	Nickname   string    // 客户端昵称
-	Boo        bool      //是否在线
-	LastActive time.Time // 最后活跃时间
+	Conn       net.Conn // TCP连接
+	Nickname   string   // 客户端昵称
+	Boo        bool     //是否在线
+	LastActive time.Time
 }
 
 // ReceiveClient 接收客户端用于私发消息,和单个接收消息
@@ -34,7 +36,7 @@ var (
 )
 
 // Radio 广播模式，发送信息
-func Radio() {
+func Radio(ctx context.Context) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("Radio()协程发生 panic: %v\n", r)
@@ -58,7 +60,7 @@ func Radio() {
 			for _, clientConn := range HbManager.clients {
 				err := same.Write(message, clientConn.Conn)
 				if err != nil {
-					fmt.Printf("客户端%v写入错误：%v\n", clientConn.Nickname, err)
+					log.Printf("客户端%v写入错误：%v\n", clientConn.Nickname, err)
 					return
 				}
 			}
@@ -67,86 +69,96 @@ func Radio() {
 
 			err := same.Write(privatemessage.message, privatemessage.client.Conn)
 			if err != nil {
-				fmt.Println("私发消息出现错误:", err)
+				log.Println("私发消息出现错误:", err)
 				return
 			}
+		case <-ctx.Done():
+			log.Println("Radio 协程退出")
+			return
+
 		}
 	}
 }
 
 // CRead 客户端读入数据处理
-func CRead(conn net.Conn, client Client) {
+func (client *Client) CRead() error {
 	for {
-		scanner, err := same.Read(conn)
+		//接受实时消息
+		realtimeMessage, err := redis.ReceiveRealtimeMessage(client.Nickname)
 		if err != nil {
-			if err == io.EOF {
-				fmt.Printf("与客户端%v连接已关闭\n", client.Nickname)
-				leaveChan <- client
-				break
-			}
-			//防止心跳检测已经将连接关闭
-			findClient := FindClient(client.Nickname)
-			if findClient.Nickname == "" {
-				break
-			}
-			leaveChan <- client
-			break
+			return err
 		}
-		for scanner.Scan() {
+		if realtimeMessage == "" {
+			// 处理空消息
+			continue
+		}
+		//解析消息
+		message, ty, err := same.AnalyzeMessage(realtimeMessage)
+		if err != nil {
+			return err
+		}
 
-			mesa := scanner.Text() // 自动按\n拆分
-			if mesa == "" {
-				// 处理空消息
-				break
-			}
+		//发送一条消息增加一次活跃度
+		err = redis.IncreaseActive(client.Nickname)
+		if err != nil {
+			return err
+		}
 
-			message, ty, err := same.AnalyzeMessage(mesa)
+		switch ty {
 
+		case TypeUnderLine:
+			client.Underline()
+
+		case TypeOnline:
+			client.Online()
+
+		case TypePrivate:
+			client.PrivateMessage(message)
+
+		case TypeList:
+			client.SList()
+
+		case TypeHeart:
+			//更新心跳检测时间
+			HbManager.UpdateClientActivity(client.Nickname)
+
+		case TypeRadio:
+			//群发功能存到list中
+			marsh, err1 := same.CreateMessage(client.Nickname, "", TypeRadio, message)
 			if err != nil {
-				return
+				return err
 			}
-
-			switch ty {
-
-			case "UnderLine":
-				Underline(client)
-
-			case "Online":
-				Online(client)
-
-			case "Private":
-				PrivateMessage(message, client)
-
-			case "List":
-				SList(client)
-
-			case "Ping":
-				//更新心跳检测时间
-				HbManager.UpdateClientActivity(client.Nickname)
-
-			default:
-				messageChan <- fmt.Sprintf("[%s]:%s", client.Nickname, message)
+			err1 = redis.AddHistoryToList(marsh)
+			if err1 != nil {
+				return err
 			}
+			messageChan <- fmt.Sprintf("[%s]:%s", client.Nickname, message)
+
+		default:
+			fmt.Printf("与客户端%v连接已关闭\n", client.Nickname)
+			leaveChan <- *client
+			return fmt.Errorf("程序结束提示错误")
 		}
 	}
+
 }
 
 // Online 上线功能
-func Online(client Client) {
+func (client *Client) Online() {
 	HbManager.clients[client.Nickname].Boo = true
 	messageChan <- fmt.Sprintf("[%s]已上线", client.Nickname)
 
 }
 
 // Underline 下线功能
-func Underline(client Client) {
+func (client *Client) Underline() {
 	HbManager.clients[client.Nickname].Boo = false
 	messageChan <- fmt.Sprintf("[%s]已下线", client.Nickname)
 
 }
 
 // SList 列出所有用户
-func SList(client Client) {
+func (client *Client) SList() {
 	var s string
 	for c, b := range HbManager.clients {
 		fmt.Println(c)
@@ -155,25 +167,37 @@ func SList(client Client) {
 		} else {
 			s += fmt.Sprintf("用户名:%v 状态：已下线\n", c)
 		}
-
 	}
-	receiveClient := ReceiveClient{client: client, message: s}
+	receiveClient := ReceiveClient{client: *client, message: s}
 	privateChan <- receiveClient
 }
 
 // PrivateMessage 处理私发功能
-func PrivateMessage(mesa string, client Client) {
+func (client *Client) PrivateMessage(mesa string) {
+
 	name, message, err1 := FindName(mesa)
 	if err1 != nil {
-		privateChan <- ReceiveClient{client: client, message: "私发格式错误"}
+		privateChan <- ReceiveClient{client: *client, message: "私发格式错误"}
 		return
 	}
+
 	Sendclient := FindClient(name)
 	if Sendclient.Nickname == "" {
-		privateChan <- ReceiveClient{client: client, message: "未找到该用户无法私发"}
+		privateChan <- ReceiveClient{client: *client, message: "未找到该用户无法私发"}
 	} else {
-		fmt.Printf("用户[%v]对用户[%v]私发了：%v", client.Nickname, name, message)
+
+		//私发功能存到历史消息list中
+		marsh, err2 := same.CreateMessage(client.Nickname, Sendclient.Nickname, TypeRadio, message)
+		if err2 != nil {
+			return
+		}
+		err1 = redis.AddHistoryToList(marsh)
+		if err1 != nil {
+			return
+		}
+
+		fmt.Printf("用户[%v]对用户[%v]私发了：%v\n", client.Nickname, name, message)
 		privateChan <- ReceiveClient{message: fmt.Sprintf("收到来自[%v]的私发:%v", client.Nickname, message), client: Sendclient}
-		privateChan <- ReceiveClient{message: "发送成功", client: client}
+		privateChan <- ReceiveClient{message: "发送成功", client: *client}
 	}
 }

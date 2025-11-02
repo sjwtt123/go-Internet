@@ -11,8 +11,7 @@ import (
 func GetfromShell() (string, error) {
 	readString, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil {
-		fmt.Println("从终端获取数据错误：", err)
-		return "", err
+		return "", fmt.Errorf("从终端获取数据错误：%v", err)
 	}
 	st := strings.TrimSpace(readString)
 	return st, err
@@ -25,7 +24,8 @@ func showWelcomeMessage() {
 	fmt.Println("2. 上线功能")
 	fmt.Println("3. 下线功能")
 	fmt.Println("4. 显示所有用户")
-	fmt.Println("5. 退出登录")
+	fmt.Println("5. 显示活跃度列表")
+	fmt.Println("6. 退出登录")
 	fmt.Println("--------------------------------")
 }
 

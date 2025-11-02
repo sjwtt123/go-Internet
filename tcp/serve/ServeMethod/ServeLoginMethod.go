@@ -4,12 +4,15 @@ import (
 	"fmt"
 	same "go-Internet/tcp/Samemethod"
 	"go-Internet/tcp/tool/mysql"
+	"go-Internet/tcp/tool/redis"
+	_ "go-Internet/tcp/tool/redis"
+	"log"
 	"net"
 	"runtime/debug"
 )
 
-// Init 初始化mysql
-func Init() {
+// init 初始化mysql
+func init() {
 	//初始化数据库
 	err, dbs := mysql.Start()
 	db = dbs
@@ -20,48 +23,54 @@ func Init() {
 }
 
 // ISLoginOrCreate 判断登录或者创建用户
-func ISLoginOrCreate(conn net.Conn) {
+func (client *Client) ISLoginOrCreate() error {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("ISLoginOrCreate()协程发生 panic: %v\n", r)
+			log.Printf("ISLoginOrCreate()协程发生 panic: %v\n", r)
 			debug.PrintStack() // 打印堆栈跟踪
 		}
 	}()
+	for {
+		scanner, err := same.Read(client.Conn)
+		if err != nil {
+			return fmt.Errorf("判断登录或者注册功能读取失败：%v", err)
+		}
 
-	Init()
+		for scanner.Scan() {
+			ion := scanner.Text()
+			if ion == ServeCommandRegister {
+				err = client.ReIsHaveUser()
+				if err != nil {
+					if err.Error() == "注册失败" {
+						break
+					}
+					log.Println(err)
+					return err
 
-	scanner, err := same.Read(conn)
-	if err != nil {
-		fmt.Println("判断登录或者注册功能读取失败：", err)
-		return
-	}
+				}
+			} else if ion == ServeCommandLogin {
+				err = client.LoIsNotHaveUser()
+				if err != nil {
+					if err.Error() == "登录失败" {
+						break
+					}
+					log.Println(err)
+					return err
 
-	for scanner.Scan() {
-		ion := scanner.Text()
-		if ion == "2" {
-			err := ReIsHaveUser(conn)
-			if err != nil {
-				fmt.Println("注册出现错误", err)
-				return
+				}
 			}
-		} else {
-			err := LoIsNotHaveUser(conn)
-			if err != nil {
-				fmt.Println("登录出现错误", err)
-				return
-			}
+			return nil
 		}
 
 	}
-
 }
 
 // LoIsNotHaveUser 登录功能
-func LoIsNotHaveUser(conn net.Conn) error {
+func (client *Client) LoIsNotHaveUser() error {
 	var passwd, username string
-LOOP:
+
 	//获取用户名
-	scanner, err := same.Read(conn)
+	scanner, err := same.Read(client.Conn)
 	if err != nil {
 		return fmt.Errorf("登录时读出数据失败:%v", err)
 	}
@@ -74,20 +83,22 @@ LOOP:
 		isHaveClient := FindClient(username)
 
 		if !isHaveUser || isHaveClient.Nickname != "" {
-			err2 := same.Write("noCreate", conn)
+			err2 := same.Write(ReceiveUserExistsOrLo, client.Conn)
 			if err2 != nil {
 				return fmt.Errorf("登录判断用户存在写入数据失败:%v", err2)
 			}
-			goto LOOP
+
+			return fmt.Errorf("登录失败")
+
 		} else {
 			//用户校验成功返回
-			err2 := same.Write("success", conn)
+			err2 := same.Write(ReceiveSuccess, client.Conn)
 			if err2 != nil {
 				return fmt.Errorf("登录成功写入数据失败:%v", err2)
 			}
 
 			//获取密码
-			scanner1, err1 := same.Read(conn)
+			scanner1, err1 := same.Read(client.Conn)
 			if err1 != nil {
 				return fmt.Errorf("登录获取密码数据失败:%v", err1)
 			}
@@ -96,16 +107,17 @@ LOOP:
 				passwd = scanner1.Text()
 			}
 			//判断密码是否正确
-			boo, err := IsCurrentPasswd(username, passwd, conn)
+			boo, err := IsCurrentPasswd(username, passwd, client.Conn)
 			if err != nil {
 				return fmt.Errorf("登录密码校验失败:%v", err)
 			}
 			if !boo {
-				goto LOOP
+				return fmt.Errorf("登录失败")
 			}
+			client.Nickname = username
+			client.CreateprocessAndStart()
 		}
 	}
-	Createprocess(username, conn)
 
 	return nil
 }
@@ -117,11 +129,11 @@ func IsCurrentPasswd(username string, passwd string, conn net.Conn) (bool, error
 		return false, err
 	}
 	if namePasswd {
-		err = same.Write("true", conn)
+		err = same.Write(ReceiveTrue, conn)
 		return true, err
 
 	} else {
-		err = same.Write("false", conn)
+		err = same.Write(ReceiveFalse, conn)
 		return false, err
 
 	}
@@ -129,35 +141,37 @@ func IsCurrentPasswd(username string, passwd string, conn net.Conn) (bool, error
 }
 
 // ReIsHaveUser 注册功能
-func ReIsHaveUser(conn net.Conn) error {
+func (client *Client) ReIsHaveUser() error {
 	var passwd string
 
 	//获取用户名
-LOOP:
-	scanner, err := same.Read(conn)
+	scanner, err := same.Read(client.Conn)
 	if err != nil {
 		return fmt.Errorf("注册读入用户名出错：%v", err)
 	}
 
 	for scanner.Scan() {
 		username := scanner.Text()
-		name := IsHaveUser(username)
 
-		if name {
-			err1 := same.Write("isCreate", conn)
+		//判断是否存在用户
+		isExistname := IsHaveUser(username)
+
+		if isExistname {
+			err1 := same.Write(ReceiveUserExists, client.Conn)
 			if err1 != nil {
 				return fmt.Errorf("注册判断重复用户写入数据失败:%v", err1)
 			}
-			goto LOOP
-
+			fmt.Println("用户已存在请重新创建")
+			return fmt.Errorf("注册失败")
 		} else {
-			err1 := same.Write("success", conn)
+
+			err1 := same.Write(ReceiveSuccess, client.Conn)
 			if err1 != nil {
 				return fmt.Errorf("注册判断重复用户写入数据失败:%v", err1)
 			}
 
 			//获取密码
-			scanner1, err2 := same.Read(conn)
+			scanner1, err2 := same.Read(client.Conn)
 			if err2 != nil {
 				return fmt.Errorf("注册获取密码读取数据失败:%v", err2)
 			}
@@ -171,29 +185,27 @@ LOOP:
 				return fmt.Errorf("注册新用户存入数据库失败：%v", err3)
 			}
 
-			err4 := same.Write(username+"用户注册成功", conn)
+			err4 := same.Write(username+"用户注册成功", client.Conn)
 			if err4 != nil {
 				return fmt.Errorf("用户注册成功信息写入失败:%v", err4)
 			}
 
-			Createprocess(username, conn)
+			//注册后将用户写入redis，初始活跃度为1
+			redis.AddIntoActive(username, 1)
 
+			client.Nickname = username
+			client.CreateprocessAndStart()
 		}
 	}
 
 	return nil
 }
 
-// Createprocess 创建用户实例
-func Createprocess(username string, conn net.Conn) {
+// CreateprocessAndStart  创建用户实例
+func (client *Client) CreateprocessAndStart() {
 
 	//创建用户对象存每个客户的用户名，加入到在线客户端中
-	client := Client{Nickname: username, Conn: conn, Boo: true}
-	HbManager.AddClient(&client)
-
-	messageChan <- fmt.Sprintf("%s进入聊天室", username)
-
-	//开启信息处理流程
-	CRead(conn, client)
+	HbManager.AddClient(client)
+	messageChan <- fmt.Sprintf("%s进入聊天室", client.Nickname)
 
 }

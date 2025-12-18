@@ -54,30 +54,25 @@ func (client *Client) RegisterUser() error {
 	if err != nil {
 		return fmt.Errorf("注册时写入用户名数据错误:%v", err)
 	}
-	scanner, err := same.Read(client.Dial)
-	if err != nil {
+
+	msg, err1 := same.Read(client.Dial)
+	if err1 != nil {
 		return fmt.Errorf("读入用户名是否重复数据失败:%v", err)
 	}
 
-	for scanner.Scan() {
-		if scanner.Text() == ResponseUserExists {
-
-			fmt.Println("用户已存在请重新输入")
-			return fmt.Errorf("注册失败")
-		} else {
-			err1 := same.Write(passwd, client.Dial)
-			if err1 != nil {
-				return fmt.Errorf("传入密码数据失败:%v", err1)
-			}
-
-			//注册成功赋值nickname
-			client.Nickname = username
-			return nil
+	if msg == ResponseUserExists {
+		fmt.Println("用户已存在请重新输入")
+		return fmt.Errorf("注册失败")
+	} else {
+		err1 = same.Write(passwd, client.Dial)
+		if err1 != nil {
+			return fmt.Errorf("传入密码数据失败:%v", err1)
 		}
+
+		//注册成功赋值nickname
+		client.Nickname = username
+		return nil
 	}
-
-	return nil
-
 }
 
 // LoginUser 用户登录
@@ -94,44 +89,36 @@ func (client *Client) LoginUser() error {
 	}
 
 	//验证用户名
-	scanner, err := same.Read(client.Dial)
+	msg, err := same.Read(client.Dial)
 	if err != nil {
 		return fmt.Errorf("登录时从服务端读入用户名验证失败:%v", err)
 	}
 
-	for scanner.Scan() {
-		if scanner.Text() == ResponseUserExistsOrLo {
-
-			fmt.Println("用户不存在或已登录请重新输入")
-			return fmt.Errorf("登录失败")
-		} else {
-			err = same.Write(passwd, client.Dial)
-			if err != nil {
-				return fmt.Errorf("传入密码数据失败:%v", err)
-			}
-			break
+	if msg == ResponseUserExistsOrLo {
+		fmt.Println("用户不存在或已登录请重新输入")
+		return fmt.Errorf("登录失败")
+	} else {
+		err = same.Write(passwd, client.Dial)
+		if err != nil {
+			return fmt.Errorf("传入密码数据失败:%v", err)
 		}
 	}
 
 	//验证密码
-	scanner1, err := same.Read(client.Dial)
+	msg, err = same.Read(client.Dial)
 	if err != nil {
 		return fmt.Errorf("登录时从服务端读入密码验证失败:%v", err)
 	}
 
-	for scanner1.Scan() {
-		if scanner1.Text() == ResponseLoginFailed {
-			fmt.Println("登录密码错误,请重新输入")
-			return fmt.Errorf("登录失败")
-		} else {
-
-			client.Nickname = username
-			fmt.Println("登录成功")
-			return nil
-		}
+	if msg == ResponseLoginFailed {
+		fmt.Println("登录密码错误,请重新输入")
+		return fmt.Errorf("登录失败")
+	} else {
+		client.Nickname = username
+		fmt.Println("登录成功")
+		return nil
 	}
 
-	return nil
 }
 
 // GetNameAndPasswd 从终端获取用户名和密码

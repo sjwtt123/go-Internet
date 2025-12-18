@@ -35,7 +35,6 @@ func SelectOneByName(db *sqlx.DB, name string) (bool, error) {
 }
 
 func SelectByNamePasswd(db *sqlx.DB, name string, passwd string) (bool, error) {
-
 	var users []User
 	err := db.Select(&users, "select * from tcp_user where name=? and passwd=?", name, passwd)
 	if err != nil {

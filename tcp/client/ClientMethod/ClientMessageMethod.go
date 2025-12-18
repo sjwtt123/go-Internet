@@ -26,22 +26,11 @@ func (client *Client) Read() error {
 	}()
 
 	for {
-		scanner, err := same.Read(client.Dial)
-
+		msg, err := same.Read(client.Dial)
 		if err != nil {
 			return fmt.Errorf("读取结束,连接关闭:%v", err)
 		}
-
-		for scanner.Scan() {
-			msg := scanner.Text() // 自动按\n拆分
-			fmt.Println(msg)
-		}
-
-		// 检查退出原因：错误或EOF
-		if err = scanner.Err(); err != nil {
-			return fmt.Errorf("连接异常退出：%v", err)
-		}
-
+		fmt.Println(msg)
 	}
 }
 
@@ -63,8 +52,8 @@ func (client *Client) WriteHeart() error {
 			return fmt.Errorf("心跳检测ping客户端:%v", err)
 		}
 
-		err1 := redis.ClientSendMessage(client.Nickname, message)
-		if err1 != nil {
+		err = same.Write(message, client.Dial)
+		if err != nil {
 			return fmt.Errorf("心跳检测ping客户端:%v", err)
 		}
 	}
@@ -116,7 +105,7 @@ func (client *Client) Start() error {
 			continue
 
 		case "4":
-			err1 = client.List()
+			err1 := client.List()
 			if err1 != nil {
 				return err
 			}
@@ -128,7 +117,7 @@ func (client *Client) Start() error {
 			}
 
 		case "6":
-			err = client.Dial.Close()
+			err := client.Leave()
 			if err != nil {
 				return fmt.Errorf("关闭与服务端连接失败:%v", err)
 			}
@@ -141,7 +130,6 @@ func (client *Client) Start() error {
 				return err
 			}
 		}
-
 	}
 }
 
@@ -157,7 +145,7 @@ func (client *Client) Online() (bool, error) {
 			return false, fmt.Errorf("客户端创建上线功能：%v", err2)
 		}
 
-		err := redis.ClientSendMessage(client.Nickname, marshal)
+		err := same.Write(marshal, client.Dial)
 		if err != nil {
 			return false, fmt.Errorf("客户端创建上线功能：%v", err)
 		}
@@ -180,7 +168,7 @@ func (client *Client) UnderLine() (bool, error) {
 		}
 
 		//将数据写到流内
-		err := redis.ClientSendMessage(client.Nickname, marshal)
+		err := same.Write(marshal, client.Dial)
 		if err != nil {
 			return false, fmt.Errorf("客户端创建下线功能：%v", err)
 		}
@@ -199,7 +187,7 @@ func (client *Client) WriteTO(readString string) error {
 	var marshal string
 	var err1 error
 
-	//判断是私发还是群发功能
+	//判断是私发还是群发功能(不应该根据前面两个字符来判断私发，因该有流程选择开启私发过程)
 	if len(readString) >= 2 && readString[0:2] == "TO" {
 
 		marshal, err1 = same.CreateMessage(client.Nickname, "", TypePrivate, readString)
@@ -214,10 +202,11 @@ func (client *Client) WriteTO(readString string) error {
 		}
 	}
 
-	err := redis.ClientSendMessage(client.Nickname, marshal)
+	err := same.Write(marshal, client.Dial)
 	if err != nil {
 		return fmt.Errorf("客户端发送消息功能：%v", err)
 	}
+
 	return nil
 }
 
@@ -229,9 +218,24 @@ func (client *Client) List() error {
 		return fmt.Errorf("客户端list列表功能：%v", err1)
 	}
 
-	err := redis.ClientSendMessage(client.Nickname, marshal)
+	err := same.Write(marshal, client.Dial)
 	if err != nil {
 		return fmt.Errorf("客户端list列表功能：%v", err)
+	}
+	return nil
+}
+
+// Leave 列表功能
+func (client *Client) Leave() error {
+
+	marshal, err1 := same.CreateMessage(client.Nickname, "", "leave", "")
+	if err1 != nil {
+		return fmt.Errorf("客户端退出聊天室功能：%v", err1)
+	}
+
+	err := same.Write(marshal, client.Dial)
+	if err != nil {
+		return fmt.Errorf("客户端退出聊天室功能：%v", err)
 	}
 	return nil
 }

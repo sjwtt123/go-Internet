@@ -3,9 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	same "go-Internet/tcp/Samemethod"
 	method "go-Internet/tcp/client/ClientMethod"
-	"go-Internet/tcp/tool/redis"
 	"log"
 	"net"
 	"os"
@@ -82,16 +80,7 @@ func main() {
 		log.Println("逻辑触发退出")
 	case sig := <-sigChan:
 		log.Printf("收到系统信号: %v\n", sig)
-	}
-
-	// 在退出前发送“下线通知”
-	message, err := same.CreateMessage(client.Nickname, "", "", "Offline")
-	if err != nil {
-		log.Println("创建下线信息失败:", err)
-	} else {
-		if err = redis.ClientSendMessage(client.Nickname, message); err != nil {
-			log.Println("发送下线信息失败:", err)
-		}
+		client.Leave()
 	}
 
 	fmt.Println("程序退出")

@@ -92,7 +92,7 @@ func (hm *HeartbeatManager) checkHeartbeats() {
 		if timeSinceLastActive > hm.timeout {
 			log.Printf("客户端 %s 心跳超时 (%.0f秒) 断开连接\n",
 				client.Nickname, timeSinceLastActive.Seconds())
-			leaveChan <- *client // 从管理器中移除
+			leaveChan <- client // 从管理器中移除
 		} else {
 			// 正常情况，打印心跳状态
 			fmt.Printf("客户端 %s 心跳正常 (%.0f秒前活跃)\n",

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	method "go-Internet/tcp/serve/ServeMethod"
+	"go-Internet/tcp/tool/redis"
 	"log"
 	"net"
 	"runtime/debug"
@@ -26,7 +27,13 @@ func main() {
 
 	//开启心跳检测
 	go method.HbManager.Start()
+	//为每个用户开启广播协程
+	go method.Radio()
 
+	//开启队列读取消息功能
+	go redis.ReceiveRealtimeMessage()
+
+	method.InitRedisMessageHandler()
 	for {
 
 		//等待下一个连接到该接口的连接
@@ -44,25 +51,31 @@ func main() {
 			Conn:     accept,
 			Nickname: "",
 			Boo:      true,
+			Inchan:   make(chan string, 100),
+			Outchan:  make(chan string, 100),
 		}
-
-		//为每个用户开启广播协程
-		go method.Radio(ctx)
-
-		//开启登录功能
+		//持续读取客户端发来的消息
 		go func() {
-			err = client.ISLoginOrCreate()
+			err = client.ReadLoop(ctx)
 			if err != nil {
 				cancel()
 			}
-			//开启信息处理流程
-			go func() {
-				err = client.CRead()
-				if err != nil {
-					cancel()
-				}
-			}()
+		}()
 
+		//阻塞接收需要写入道客户端的信息
+		go func() {
+			err = client.WriteLoop(ctx)
+			if err != nil {
+				cancel()
+			}
+		}()
+
+		//开启处理登录，及后续消息处理功能
+		go func() {
+			err = client.HandleLogic(ctx)
+			if err != nil {
+				cancel()
+			}
 		}()
 
 	}

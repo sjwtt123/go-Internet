@@ -9,11 +9,20 @@ const (
 	MessageStream = "user_messages" // 统一的消息流
 )
 
+var MessageHandler func(msg Message)
+
+type Message struct {
+	Content string
+	Type    string
+	From    string
+}
+
 // ClientSendMessage 发送消息到目标流中
-func ClientSendMessage(from string, content string) error {
+func ClientSendMessage(content string, ty string, form string) error {
 	values := map[string]interface{}{
-		"from_user_id": from,
-		"content":      content,
+		"content": content,
+		"type":    ty,
+		"form":    form,
 	}
 	err := Rdb.XAdd(ctx, &redis.XAddArgs{
 		Stream: MessageStream,
@@ -30,30 +39,35 @@ func ClientSendMessage(from string, content string) error {
 }
 
 // ReceiveRealtimeMessage 使用 XRead 实时监听消息（非消费者组版）
-func ReceiveRealtimeMessage(username string) (string, error) {
-	lastID := "$" // 从最新消息开始（跳过旧消息）
+func ReceiveRealtimeMessage() {
+	lastID := "$"
 
-	// 阻塞读取（一直等待直到有新消息）
-	streams, err := Rdb.XRead(ctx, &redis.XReadArgs{
-		Streams: []string{MessageStream, lastID},
-		Block:   0, // 0 表示永久阻塞
-		Count:   1, // 每次取一条
-	}).Result()
+	for {
+		streams, err := Rdb.XRead(ctx, &redis.XReadArgs{
+			Streams: []string{MessageStream, lastID},
+			Block:   0,
+			Count:   1,
+		}).Result()
 
-	if err != nil {
-		return "", fmt.Errorf("读取实时消息失败：%v\n", err)
-	}
+		if err != nil {
+			fmt.Printf("读取实时消息失败：%v\n", err)
+			continue
+		}
 
-	for _, stream := range streams {
-		for _, message := range stream.Messages {
-			lastID = message.ID // 更新读取位置（下次从此之后读）
-			from := message.Values["from_user_id"]
-			content := message.Values["content"]
-			if from != username {
-				return "", nil
+		for _, stream := range streams {
+			for _, message := range stream.Messages {
+				lastID = message.ID
+
+				msg := Message{
+					Content: message.Values["content"].(string),
+					Type:    message.Values["type"].(string),
+					From:    message.Values["form"].(string),
+				}
+
+				if MessageHandler != nil {
+					MessageHandler(msg)
+				}
 			}
-			return content.(string), nil
 		}
 	}
-	return "", nil
 }

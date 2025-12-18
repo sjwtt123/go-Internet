@@ -30,15 +30,15 @@ func FindName(s string) (string, string, error) {
 }
 
 // FindClient 寻找用户
-func FindClient(name string) Client {
+func FindClient(name string) *Client {
 	HbManager.mutex.Lock()
 	defer HbManager.mutex.Unlock()
 	for _, client := range HbManager.clients {
 		if client.Nickname == name {
-			return *client
+			return client
 		}
 	}
-	return Client{}
+	return nil
 }
 
 // CloseConn 关闭与客户端连接

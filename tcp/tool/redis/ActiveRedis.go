@@ -12,7 +12,7 @@ var ctx = context.Background()
 
 func init() {
 	Rdb = redis.NewClient(&redis.Options{
-		Addr:     "127.0.0.1:6379",
+		Addr:     "192.168.118.130:6379",
 		Password: "",
 		DB:       1,
 	})
